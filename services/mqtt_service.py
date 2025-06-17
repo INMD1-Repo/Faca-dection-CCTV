@@ -4,7 +4,7 @@ import time
 import json
 
 #복호화키를 불려오기 위한 패키지
-from Crypdeto.PublicKey import RSA
+from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64
 from pydantic import BaseModel
@@ -14,9 +14,12 @@ class MQTTService:
     async def publish_message(topic, message, password):
         if(password == "nullcodoe"):
             json_data = {
-                "notice": "this is sample",
-                "message": message,
-                "time_Arlet":  time.strftime('%c', time.localtime(time.time()))
+                "Type": "deaccess",
+                "name": "TestTest",
+                "etc1": message,
+                "etc2": message,
+                "etc3": message,
+                "send_time":  time.strftime('%c', time.localtime(time.time()))
             }
             mqtt.publish(topic, json.dumps(json_data))
             return {"result": True, "message": "Published"}
