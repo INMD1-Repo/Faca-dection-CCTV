@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>얼굴 학습 웹캠 영상 업로드</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    video, canvas { border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 8px 16px; margin: 10px 0; cursor: pointer; }
+    #alerts { margin-top: 20px; color: green; }
+    #error { margin-top: 20px; color: red; }
+    #progress { margin-top: 10px; }
+    #downloadSection { margin-top: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+    #previewVideo { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>얼굴 학습 (웹캠 영상 업로드)</h1>
+  <video id="webcam" width="640" height="480" autoplay muted></video>
+  <br />
+  <button id="startRecord">영상 녹화 시작 (45초)</button>
+  <button id="stopRecord" disabled>영상 녹화 종료</button>
+  <div id="progress">녹화 준비 중...</div>
+  <div id="alerts"></div>
+  <div id="error"></div>
+
+  <div id="downloadSection" style="display: none;">
+    <h3>녹화된 영상</h3>
+    <button id="downloadBtn">영상 다운로드</button>
+    <button id="previewBtn">영상 미리보기</button>
+    <video id="previewVideo" width="640" height="480" controls style="display: none;"></video>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const startBtn = document.getElementById('startRecord');
+    const stopBtn = document.getElementById('stopRecord');
+    const progressDiv = document.getElementById('progress');
+    const alertsDiv = document.getElementById('alerts');
+    const errorDiv = document.getElementById('error');
+    const downloadSection = document.getElementById('downloadSection');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const previewBtn = document.getElementById('previewBtn');
+    const previewVideo = document.getElementById('previewVideo');
+
+    let mediaRecorder;
+    let recordedChunks = [];
+    let recordingTimer;
+    let recordedBlob = null;
+
+    async function startWebcam() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        progressDiv.textContent = "웹캠 연결 성공!";
+      } catch (err) {
+        errorDiv.textContent = '웹캠 연결 실패: ' + err.message;
+      }
+    }
+
+    startBtn.addEventListener('click', async () => {
+      errorDiv.textContent = '';
+      alertsDiv.textContent = '';
+      recordedChunks = [];
+      downloadSection.style.display = 'none';
+
+      try {
+        const stream = video.srcObject;
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            recordedChunks.push(e.data);
+            console.log('데이터 수집:', e.data.size, 'bytes');
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          console.log('녹화 완료, 총 청크 수:', recordedChunks.length);
+          console.log('총 데이터 크기:', recordedChunks.reduce((total, chunk) => total + chunk.size, 0), 'bytes');
+          
+          recordedBlob = new Blob(recordedChunks, { type: 'video/webm' });
+          console.log('최종 블롭 크기:', recordedBlob.size, 'bytes');
+          
+          downloadSection.style.display = 'block';
+          
+          const personName = prompt('학습할 사람의 이름을 입력하세요:');
+          if (!personName) {
+            errorDiv.textContent = '사람 이름을 입력해야 합니다.';
+            return;
+          }
+
+          try {
+            const formData = new FormData();
+            formData.append('person_name', personName);
+            formData.append('video_file', recordedBlob, 'recording.webm');
+
+            progressDiv.textContent = '영상 업로드 중...';
+            const response = await fetch('/faces/learn_video', {
+              method: 'POST',
+              body: formData
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(errorText);
+            }
+
+            const result = await response.json();
+            alertsDiv.textContent = result.message;
+            progressDiv.textContent = '업로드 및 학습 완료!';
+          } catch (err) {
+            errorDiv.textContent = '학습 요청 실패: ' + err.message;
+            progressDiv.textContent = '업로드 실패';
+          }
+        };
+
+        mediaRecorder.start(100);
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        progressDiv.textContent = '녹화 중 (45초 동안 녹화됩니다)';
+
+        recordingTimer = setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            stream.getTracks().forEach(track => track.stop());
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            progressDiv.textContent = '녹화 완료!';
+          }
+        }, 45000);
+
+      } catch (err) {
+        errorDiv.textContent = '녹화 시작 실패: ' + err.message;
+      }
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        clearTimeout(recordingTimer);
+        video.srcObject.getTracks().forEach(track => track.stop());
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        progressDiv.textContent = '녹화 완료!';
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (recordedBlob) {
+        const url = URL.createObjectURL(recordedBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `recorded_video_${new Date().getTime()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    previewBtn.addEventListener('click', () => {
+      if (recordedBlob) {
+        const url = URL.createObjectURL(recordedBlob);
+        previewVideo.src = url;
+        previewVideo.style.display = 'block';
+        previewVideo.onloadedmetadata = () => {
+          console.log('영상 길이:', previewVideo.duration, '초');
+          console.log('해상도:', previewVideo.videoWidth, 'x', previewVideo.videoHeight);
+        };
+      }
+    });
+
+    startWebcam();
+  </script>
+</body>
+</html>
